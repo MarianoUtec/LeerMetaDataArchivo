@@ -1,0 +1,52 @@
+import json
+import boto3
+from urllib.parse import unquote_plus
+
+s3_client = boto3.client('s3')
+sns_client = boto3.client('sns')
+
+def lambda_handler(event, context):
+    print(event)  # Revisar en CloudWatch
+
+    # Entrada (json)
+    record = event['Records'][0]
+    bucket_name = record['s3']['bucket']['name']
+    archivo_id = unquote_plus(record['s3']['object']['key'])  # decodifica espacios, tildes, etc.
+    tenant_id = archivo_id.split('/')[1]  # UTEC, UNIV2, etc.
+    archivo_last_modified = record['eventTime']
+    archivo_size = record['s3']['object']['size']
+
+    # Leer metadata personalizada del objeto en S3
+    head = s3_client.head_object(Bucket=bucket_name, Key=archivo_id)
+    metadata = head.get('Metadata', {})
+    print(metadata)  # Revisar en CloudWatch
+    codigo_curso = metadata.get('codigo-curso', 'NO_DEFINIDO')
+    codigo_alumno = metadata.get('codigo-alumno', 'NO_DEFINIDO')
+
+    archivo = {
+        'tenant_id': tenant_id,
+        'archivo_id': archivo_id,
+        'archivo_datos': {
+            'last_modified': archivo_last_modified,
+            'size': archivo_size,
+            'bucket_name': bucket_name,
+            'codigo_curso': codigo_curso,
+            'codigo_alumno': codigo_alumno
+        }
+    }
+    print(archivo)
+
+    # Publicar en SNS
+    response_sns = sns_client.publish(
+        TopicArn='arn:aws:sns:us-east-1:447891120606:TemaNuevoArchivo',
+        Subject='Nuevo Archivo',
+        Message=json.dumps(archivo),
+        MessageAttributes={
+            'tenant_id': {'DataType': 'String', 'StringValue': tenant_id}
+        }
+    )
+
+    return {
+        'statusCode': 200,
+        'body': response_sns
+    }
